@@ -77,9 +77,47 @@ def analyze_stylometrics(text: str) -> float:
     return round(max(0.0, min(1.0, signal_2)), 4)
 
 
-def calculate_final_confidence(groq_score: float, stylo_score: float) -> float:
+# Signal 3: N-gram AI marker lexicon
+# Weights reflect how exclusively each phrase is associated with AI output.
+AI_MARKERS = [
+    ("delve", 1.5), ("tapestry", 1.5), ("testament", 1.2), ("whimsical", 1.2),
+    ("ethereal", 1.2), ("pivotal", 1.0), ("embark", 1.0), ("unleash", 1.0),
+    ("revolutionize", 1.0), ("unprecedented", 1.0), ("transformative", 1.0),
+    ("it is worth noting", 1.5), ("in the realm of", 1.5), ("it's worth noting", 1.5),
+    ("in conclusion", 1.2), ("furthermore", 1.0), ("moreover", 1.0),
+    ("in today's", 1.0), ("leverage", 0.8), ("utilize", 0.8),
+    ("cutting-edge", 1.0), ("synergy", 1.2), ("paradigm", 1.0),
+    ("holistic", 1.0), ("robust", 0.8), ("scalable", 0.8),
+    ("stakeholders", 1.0), ("streamline", 1.0), ("foster", 0.8),
+    ("drive innovation", 1.5), ("game-changer", 1.2), ("thought leader", 1.2),
+    ("at the end of the day", 1.0), ("in today's fast-paced", 1.5),
+    ("nuanced", 0.8), ("multifaceted", 1.0), ("comprehensive", 0.8),
+]
+
+
+def analyze_ngram(text: str) -> float:
     """
-    Combines Signal 1 (Groq) and Signal 2 (stylometrics) into a final confidence score.
+    Returns a float in [0.0, 1.0] representing AI marker word density.
+    Uses sigmoid compression so score is proportional to density, not raw count.
+    """
+    text_lower = text.lower()
+    words = re.findall(r"[a-z']+", text_lower)
+    if not words:
+        return 0.5
+
+    word_count = len(words)
+    raw = sum(weight for marker, weight in AI_MARKERS if marker in text_lower)
+    # Normalize per 100 words, then sigmoid-compress centered at density=2
+    density = raw / (word_count / 100)
+    score = 1 / (1 + math.exp(-(density - 2)))
+    return round(max(0.0, min(1.0, score)), 4)
+
+
+def calculate_final_confidence(groq_score: float, stylo_score: float, ngram_score: float = None) -> float:
+    """
+    Combines all signals into a final confidence score.
+    With 3 signals: weights are 0.45 / 0.35 / 0.20.
+    With 2 signals: weights are 0.55 / 0.45 (ngram_score=None).
     Applies a 0.5x penalty to the Groq score when stylometrics detect strong human
     variance (stylo_score < 0.30), preventing the LLM from unilaterally condemning
     a human writer.
@@ -89,7 +127,11 @@ def calculate_final_confidence(groq_score: float, stylo_score: float) -> float:
     else:
         effective_groq = groq_score
 
-    base_score = (effective_groq * 0.55) + (stylo_score * 0.45)
+    if ngram_score is not None:
+        base_score = (effective_groq * 0.45) + (stylo_score * 0.35) + (ngram_score * 0.20)
+    else:
+        base_score = (effective_groq * 0.55) + (stylo_score * 0.45)
+
     return round(max(0.0, min(1.0, base_score)), 4)
 
 
